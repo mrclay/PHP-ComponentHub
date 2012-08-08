@@ -33,37 +33,91 @@ use InvalidArgumentException,
  * @author  Fabien Potencier
  * @author  Steve Clay
  */
-class DI
+class DiContainer
 {
     private $values;
 
     /**
      * Instantiate the container.
      *
-     * Objects and parameters can be passed as argument to the constructor.
-     *
-     * @param array $values The parameters or objects.
+     * @param array $config array with keys "params", "services", and "sharedServices"
+     *                      each being an array of ID to value
      */
-    public function __construct (array $values = array())
+    public function __construct (array $config = array())
     {
-        $this->values = $values;
+        if (! empty($config['params'])) {
+            foreach ($config['params'] as $id => $value) {
+                $this->setParam($id, $value);
+            }
+        }
+        if (! empty($config['services'])) {
+            foreach ($config['services'] as $id => $value) {
+                $this->setService($id, $value);
+            }
+        }
+        if (! empty($config['sharedServices'])) {
+            foreach ($config['sharedServices'] as $id => $value) {
+                $this->setSharedService($id, $value);
+            }
+        }
     }
 
     /**
-     * Sets a parameter or an object.
+     * Sets a parameter
      *
-     * Objects must be defined as Closures.
+     * @param string $id The unique identifier for the parameter
+     * @param mixed $value The value of the parameter
      *
-     * Allowing any PHP callable leads to difficult to debug problems
-     * as function names (strings) are callable (creating a function with
-     * the same a name as an existing parameter would break your container).
-     *
-     * @param string $id    The unique identifier for the parameter or object
-     * @param mixed  $value The value of the parameter or a closure to defined an object
+     * @return DiContainer
      */
-    public function set($id, $value)
+    public function setParam($id, $value)
     {
+        if ($value instanceof Closure) {
+            $value = function ($c) use ($value) {
+                return $value;
+            };
+        }
         $this->values[$id] = $value;
+        return $this;
+    }
+
+    /**
+     * Sets a service
+     *
+     * @param string $id The unique identifier for the service
+     * @param Closure $callable The function that returns the service
+     *
+     * @return DiContainer
+     */
+    public function setService($id, Closure $callable)
+    {
+        $this->values[$id] = $callable;
+        return $this;
+    }
+
+    /**
+     * Sets an object for use as a shared resource
+     *
+     * Internally sets a closure that stores the result of the given closure for
+     * uniqueness in the scope of this instance of Pimple.
+     *
+     * @param string $id The unique identifier for the object
+     * @param Closure $callable The function that returns the service
+     *
+     * @return DiContainer
+     */
+    public function setSharedService($id, Closure $callable)
+    {
+        $this->values[$id] = function ($c) use ($callable) {
+            static $object;
+
+            if (null === $object) {
+                $object = $callable($c);
+            }
+
+            return $object;
+        };
+        return $this;
     }
 
     /**
@@ -101,50 +155,13 @@ class DI
     }
 
     /**
-     * Unsets a parameter or an object.
+     * Removes a parameter or an object.
      *
      * @param string $id The unique identifier for the parameter or object
      */
     public function remove($id)
     {
         unset($this->values[$id]);
-    }
-
-    /**
-     * Returns a closure that stores the result of the given closure for
-     * uniqueness in the scope of this instance of Pimple.
-     *
-     * @param Closure $callable A closure to wrap for uniqueness
-     *
-     * @return Closure The wrapped closure
-     */
-    public function getSharable(Closure $callable)
-    {
-        return function ($c) use ($callable) {
-            static $object;
-
-            if (null === $object) {
-                $object = $callable($c);
-            }
-
-            return $object;
-        };
-    }
-
-    /**
-     * Protects a callable from being interpreted as a service.
-     *
-     * This is useful when you want to store a callable as a parameter.
-     *
-     * @param Closure $callable A closure to protect from being evaluated
-     *
-     * @return Closure The protected closure
-     */
-    public function getCallableParam(Closure $callable)
-    {
-        return function ($c) use ($callable) {
-            return $callable;
-        };
     }
 
     /**
@@ -178,7 +195,7 @@ class DI
      *
      * @throws InvalidArgumentException if the identifier is not defined
      */
-    public function extend($id, Closure $callable)
+    public function extendService($id, Closure $callable)
     {
         if (!array_key_exists($id, $this->values)) {
             throw new InvalidArgumentException(sprintf('Identifier "%s" is not defined.', $id));
